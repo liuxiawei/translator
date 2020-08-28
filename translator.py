@@ -305,8 +305,8 @@ class AzureTranslator (BasicTranslator):
         try:
             resp = self.http_post(url, json.dumps(body), headers).json()
         except:
-            print("azure time out")
-            return None
+            print("\nazure time out")
+            exit(-1)
         # print(resp)
         res = {}
         res['text'] = text
@@ -357,8 +357,8 @@ class GoogleTranslator (BasicTranslator):
         try:
             r = self.http_get(url)
         except:
-            print("google time out")
-            return None
+            print("\ngoogle time out")
+            exit(-1)
         if not r:
             return None
         try:
@@ -535,8 +535,8 @@ class BingDict (BasicTranslator):
         try:
             resp = self.http_get(url, None, headers)
         except:
-            print("bingdict time out")
-            return None
+            print("\nbingdict time out")
+            exit(-1)
         if not resp:
             return None
         resp = resp.text
@@ -613,8 +613,8 @@ class BaiduTranslator (BasicTranslator):
         try:
             r = self.http_post(url, req)
         except:
-            print("baidu time out")
-            return None
+            print("\nbaidu time out")
+            exit(-1)
         resp = r.json()
         res = {}
         res['text'] = text
@@ -658,8 +658,8 @@ class CibaTranslator (BasicTranslator):
         try:
             r = self.http_get(url, req, None)
         except:
-            print("ciba time out")
-            return None
+            print("\nciba time out")
+            exit(-1)
         if not r:
             return None
         try:
