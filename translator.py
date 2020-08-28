@@ -18,6 +18,7 @@ import copy
 import json
 import codecs
 import pprint
+import threading
 
 
 #----------------------------------------------------------------------
@@ -697,36 +698,12 @@ ENGINES = {
     'ciba': CibaTranslator,
 }
 
+#----------------------------------------------------------------------
+# 处理输出
+#----------------------------------------------------------------------
 
-#----------------------------------------------------------------------
-# 主程序
-#----------------------------------------------------------------------
-def main(argv = None):
-    if argv is None:
-        argv = sys.argv
-    argv = [ n for n in argv ]
-    options, args = getopt(argv[1:])
-    engine = options.get('engine')
-    if not engine:
-        engine = 'google'
-    sl = options.get('from')
-    if not sl:
-        sl = 'auto'
-    tl = options.get('to')
-    if not tl:
-        tl = 'auto'
-    if not args:
-        msg = 'usage: translator.py {--engine=xx} {--from=xx} {--to=xx}'
-        print(msg + ' {-json} text')
-        print('engines:', list(ENGINES.keys()))
-        return 0
-    text = ' '.join(args)
-    cls = ENGINES.get(engine)
-    if not cls:
-        print('bad engine name: ' + engine)
-        return -1
-    translator = cls()
-    res = translator.translate(sl, tl, text)
+
+def print_res(res, text, options):
     if 'json' in options:
         text = json.dumps(res)
         sys.stdout.write(str(text))
@@ -751,6 +728,65 @@ def main(argv = None):
     if 'alternative' in res:
         if res['alternative']:
             print('\n'.join(res['alternative']))
+
+
+#----------------------------------------------------------------------
+# 多线程翻译
+#----------------------------------------------------------------------
+class TransThread(threading.Thread):
+    def __init__(self, sl, tl, text, engine, options):
+        super().__init__()
+        self.sl = sl
+        self.tl = tl
+        self.text = text
+        self.engine = engine
+        self.options = options
+
+    def run(self):
+        translator = self.engine()
+        res = translator.translate(self.sl, self.tl, self.text)
+        print("----------------------------------------------------------------------")
+        print(self.engine.__name__)
+        print("----------------------------------------------------------------------")
+        print_res(res, self.text, self.options)
+        return 0
+
+
+#----------------------------------------------------------------------
+# 主程序
+#----------------------------------------------------------------------
+def main(argv = None):
+    if argv is None:
+        argv = sys.argv
+    argv = [ n for n in argv ]
+    options, args = getopt(argv[1:])
+    engine = options.get('engine')
+    if not engine:
+        engine = 'all'
+    sl = options.get('from')
+    if not sl:
+        sl = 'auto'
+    tl = options.get('to')
+    if not tl:
+        tl = 'auto'
+    if not args:
+        msg = 'usage: translator.py {--engine=xx} {--from=xx} {--to=xx}'
+        print(msg + ' {-json} text')
+        print('engines:', list(ENGINES.keys()))
+        return 0
+    text = ' '.join(args)
+    if engine == 'all':
+        for engines in ENGINES.values():
+            thread = TransThread(sl, tl, text, engines, options)
+            thread.start()
+        return 0
+    cls = ENGINES.get(engine)
+    if not cls:
+        print('bad engine name: ' + engine)
+        return -1
+    translator = cls()
+    res = translator.translate(sl, tl, text)
+    print_res(res,text,options)
     return 0
 
 
@@ -822,6 +858,3 @@ if __name__ == '__main__':
         return 0
     # test9()
     main()
-
-
-
