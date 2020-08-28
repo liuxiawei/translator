@@ -302,7 +302,11 @@ class AzureTranslator (BasicTranslator):
         }
         body = [{'text': text}]
         import json
-        resp = self.http_post(url, json.dumps(body), headers).json()
+        try:
+            resp = self.http_post(url, json.dumps(body), headers).json()
+        except:
+            print("azure time out")
+            return None
         # print(resp)
         res = {}
         res['text'] = text
@@ -350,7 +354,11 @@ class GoogleTranslator (BasicTranslator):
         sl, tl = self.guess_language(sl, tl, text)
         self.text = text
         url = self.get_url(sl, tl, text)
-        r = self.http_get(url)
+        try:
+            r = self.http_get(url)
+        except:
+            print("google time out")
+            return None
         if not r:
             return None
         try:
@@ -461,7 +469,10 @@ class YoudaoTranslator (BasicTranslator):
             'action': 'FY_BY_CL1CKBUTTON',
             'typoResult': 'true'
         }
-        r = self.http_post(self.url, data, header)
+        try:
+            r = self.http_post(self.url, data, header)
+        except:
+            return None
         if not r:
             return None
         try:
@@ -521,7 +532,11 @@ class BingDict (BasicTranslator):
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.5',
         }
-        resp = self.http_get(url, None, headers)
+        try:
+            resp = self.http_get(url, None, headers)
+        except:
+            print("bingdict time out")
+            return None
         if not resp:
             return None
         resp = resp.text
@@ -595,7 +610,11 @@ class BaiduTranslator (BasicTranslator):
         req['salt'] = str(int(time.time() * 1000) + random.randint(0, 10))
         req['sign'] = self.sign(text, req['salt'])
         url = "https://fanyi-api.baidu.com/api/trans/vip/translate"
-        r = self.http_post(url, req)
+        try:
+            r = self.http_post(url, req)
+        except:
+            print("baidu time out")
+            return None
         resp = r.json()
         res = {}
         res['text'] = text
@@ -636,7 +655,11 @@ class CibaTranslator (BasicTranslator):
         req['f'] = sl
         req['t'] = tl
         req['w'] = text
-        r = self.http_get(url, req, None)
+        try:
+            r = self.http_get(url, req, None)
+        except:
+            print("ciba time out")
+            return None
         if not r:
             return None
         try:
