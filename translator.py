@@ -772,7 +772,7 @@ class TransThread(threading.Thread):
         print(self.engine.__name__)
         print("----------------------------------------------------------------------")
         print_res(res, self.text, self.options)
-        return 0
+        os._exit(0) #单个线程获得结果后则退出整个程序
 
 
 #----------------------------------------------------------------------
