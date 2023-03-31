@@ -2,10 +2,12 @@
 # -*- coding: utf-8 -*-
 #======================================================================
 #
-# translator.py - 命令行翻译（谷歌，必应，百度，有道，词霸）
+# translator.py - 命令行翻译（必应，百度，腾讯翻译君）
 #
-# Created by skywind on 2019/06/14
-# Version: 1.0.2, Last Modified: 2019/06/18 18:40
+#
+# Created by Liuxiawei 
+# Modified from skywind (https://github.com/skywind3000/translator) and qsdrqs (https://github.com/qsdrqs/translator)
+# Last Modified: 2023/03/31
 #
 #======================================================================
 from __future__ import print_function, unicode_literals
@@ -20,6 +22,11 @@ import codecs
 import pprint
 import threading
 
+from tencentcloud.common import credential
+from tencentcloud.common.profile.client_profile import ClientProfile
+from tencentcloud.common.profile.http_profile import HttpProfile
+from tencentcloud.common.exception.tencent_cloud_sdk_exception import TencentCloudSDKException
+from tencentcloud.tmt.v20180321 import tmt_client, models
 
 #----------------------------------------------------------------------
 # 编码兼容
@@ -276,240 +283,6 @@ class BasicTranslator(object):
         return m.hexdigest()
 
 
-#----------------------------------------------------------------------
-# Azure Translator
-#----------------------------------------------------------------------
-class AzureTranslator (BasicTranslator):
-
-    def __init__ (self, **argv):
-        super(AzureTranslator, self).__init__('azure', **argv)
-        if 'apikey' not in self._config:
-            sys.stderr.write('error: missing apikey in [azure] section\n')
-            sys.exit()
-        self.apikey = self._config['apikey']
-
-    def translate (self, sl, tl, text):
-        import uuid
-        sl, tl = self.guess_language(sl, tl, text)
-        qs = self.url_quote(sl)
-        qt = self.url_quote(tl)
-        url = 'https://api.cognitive.microsofttranslator.com/translate'
-        url += '?api-version=3.0&from={}&to={}'.format(qs, qt)
-        headers = {
-            'Ocp-Apim-Subscription-Key': self.apikey,
-            'Content-type': 'application/json',
-            'X-ClientTraceId': str(uuid.uuid4())
-        }
-        body = [{'text': text}]
-        import json
-        try:
-            resp = self.http_post(url, json.dumps(body), headers).json()
-        except:
-            print("\nazure time out")
-            exit(-1)
-        # print(resp)
-        res = {}
-        res['text'] = text
-        res['sl'] = sl
-        res['tl'] = tl
-        res['translation'] = self.render(resp)
-        res['html'] = None
-        res['xterm'] = None
-        return res
-
-    def render (self, resp):
-        if not resp:
-            return ''
-        x = resp[0]
-        if not x:
-            return ''
-        y = x['translations']
-        if not y:
-            return ''
-        output = ''
-        for item in y:
-            output += item['text'] + '\n'
-        return output
-
-
-#----------------------------------------------------------------------
-# Google Translator
-#----------------------------------------------------------------------
-class GoogleTranslator (BasicTranslator):
-
-    def __init__ (self, **argv):
-        super(GoogleTranslator, self).__init__('google', **argv)
-        self._agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:59.0)'
-        self._agent += ' Gecko/20100101 Firefox/59.0'
-
-    def get_url (self, sl, tl, qry):
-        http_host = self._config.get('host', 'translate.googleapis.com')
-        qry = self.url_quote(qry)
-        url = 'https://{}/translate_a/single?client=gtx&sl={}&tl={}&dt=at&dt=bd&dt=ex&' \
-              'dt=ld&dt=md&dt=qca&dt=rw&dt=rm&dt=ss&dt=t&q={}'.format(
-                      http_host, sl, tl, qry)    # noqa: E216
-        return url
-
-    def translate (self, sl, tl, text):
-        sl, tl = self.guess_language(sl, tl, text)
-        self.text = text
-        url = self.get_url(sl, tl, text)
-        try:
-            r = self.http_get(url)
-        except:
-            print("\ngoogle time out")
-            exit(-1)
-        if not r:
-            return None
-        try:
-            obj = r.json()
-        except:
-            return None
-        # pprint.pprint(obj)
-        res = self.create_translation(sl, tl, text)
-        res['phonetic'] = self.get_phonetic(obj)
-        res['definition'] = self.get_definition(obj)
-        res['explain'] = self.get_explain(obj)
-        res['detail'] = self.get_detail(obj)
-        res['alternative'] = self.get_alternative(obj)
-        return res
-
-    def get_phonetic (self, obj):
-        for x in obj[0]:
-            if len(x) == 4:
-                return x[3]
-        return None
-
-    def get_definition (self, obj):
-        paraphrase = ''
-        for x in obj[0]:
-            if x[0]:
-                paraphrase += x[0]
-        return paraphrase
-
-    def get_explain (self, obj):
-        explain = []
-        if obj[1]:
-            for x in obj[1]:
-                expl = '[{}] '.format(x[0][0])
-                for i in x[2]:
-                    expl += i[0] + ';'
-                explain.append(expl)
-        return explain
-
-    def get_detail (self, resp):
-        result = []
-        if len(resp) < 13:
-            return None
-        for x in resp[12]:
-            result.append('[{}]'.format(x[0]))
-            for y in x[1]:
-                result.append('- {}'.format(y[0]))
-                if len(y) >= 3:
-                    result.append('  * {}'.format(y[2]))
-        return result
-
-    def get_alternative (self, resp):
-        definition = self.get_definition(resp)
-        result = []
-        if len(resp) < 6:
-            return None
-        for x in resp[5]:
-            # result.append('- {}'.format(x[0]))
-            for i in x[2]:
-                if i[0] != definition:
-                    result.append(' * {}'.format(i[0]))
-        return result
-
-
-
-#----------------------------------------------------------------------
-# Youdao Translator
-#----------------------------------------------------------------------
-class YoudaoTranslator (BasicTranslator):
-
-    def __init__ (self, **argv):
-        super(YoudaoTranslator, self).__init__('youdao', **argv)
-        self.url = 'https://fanyi.youdao.com/translate_o?smartresult=dict&smartresult=rule'
-        self.D = "ebSeFb%=XZ%T[KZ)c(sy!"
-        self.D = "97_3(jkMYg@T[KZQmqjTK"
-
-    def get_md5 (self, value):
-        import hashlib
-        m = hashlib.md5()
-        # m.update(value)
-        m.update(value.encode('utf-8'))
-        return m.hexdigest()
-
-    def sign (self, text, salt):
-        s = "fanyideskweb" + text + salt + self.D
-        return self.get_md5(s)
-
-    def translate (self, sl, tl, text):
-        sl, tl = self.guess_language(sl, tl, text)
-        self.text = text
-        salt = str(int(time.time() * 1000) + random.randint(0, 10))
-        sign = self.sign(text, salt)
-        header = {
-            'Cookie': 'OUTFOX_SEARCH_USER_ID=-2022895048@10.168.8.76;',
-            'Referer': 'http://fanyi.youdao.com/',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 6.2; rv:51.0) Gecko/20100101 Firefox/51.0',
-        }
-        data = {
-            'i': text,
-            'from': sl,
-            'to': tl, 
-            'smartresult': 'dict',
-            'client': 'fanyideskweb',
-            'salt': salt,
-            'sign': sign,
-            'doctype': 'json',
-            'version': '2.1',
-            'keyfrom': 'fanyi.web',
-            'action': 'FY_BY_CL1CKBUTTON',
-            'typoResult': 'true'
-        }
-        try:
-            r = self.http_post(self.url, data, header)
-        except:
-            return None
-        if not r:
-            return None
-        try:
-            obj = r.json()
-        except:
-            return None
-        # pprint.pprint(obj)
-        res = self.create_translation(sl, tl, text)
-        res['definition'] = self.get_definition(obj)
-        res['explain'] = self.get_explain(obj)
-        return res
-
-    def get_definition (self, obj):
-        translation = ''
-        t = obj.get('translateResult')
-        if t:
-            for n in t:
-                part = []
-                for m in n:
-                    x = m.get('tgt')
-                    if x:
-                        part.append(x)
-                if part:
-                    translation += ', '.join(part)
-        return translation
-
-    def get_explain (self, obj):
-        explain = []
-        if 'smartResult' in obj:
-            smarts = obj['smartResult']['entries']
-            for entry in smarts:
-                if entry:
-                    entry = entry.replace('\r', '')
-                    entry = entry.replace('\n', '')
-                    explain.append(entry)
-        return explain
-
 
 #----------------------------------------------------------------------
 # Bing2: 免费 web 接口，只能查单词
@@ -624,6 +397,7 @@ class BaiduTranslator (BasicTranslator):
         res['translation'] = self.render(resp)
         res['html'] = None
         res['xterm'] = None
+        #print(res)
         return res
 
     def sign (self, text, salt):
@@ -632,53 +406,84 @@ class BaiduTranslator (BasicTranslator):
 
     def render (self, resp):
         output = ''
-        result = resp['trans_result']
+        try:
+            result = resp['trans_result']
+        except:
+            result=[]
         for item in result:
-            output += '' + item['src'] + '\n'
+            #output += '' + item['src'] + '\n'
             output += ' * ' + item['dst'] + '\n'
         return output
-
-
+    
+    
 #----------------------------------------------------------------------
-# 词霸
+# Tecent Translator
 #----------------------------------------------------------------------
-class CibaTranslator (BasicTranslator):
-
+class TecentTranslator (BasicTranslator):
     def __init__ (self, **argv):
-        super(CibaTranslator, self).__init__('ciba', **argv)
+        super(TecentTranslator, self).__init__('tecent', **argv)
+        #print(self._config)
+        if 'secretid' not in self._config:
+            sys.stderr.write('error: missing SecretId in [tecent] section\n')
+            sys.exit()
+        if 'secretkey' not in self._config:
+            sys.stderr.write('error: missing SecretKey in [tecent] section\n')
+            sys.exit()
+        self.SecretId = self._config['secretid']
+        self.SecretKey = self._config['secretkey']
+        langmap = {
+            'zh-cn': 'zh',
+            'zh-chs': 'zh',
+            'zh-cht': 'cht',
+            'en-us': 'en', 
+            'en-gb': 'en',
+            'ja': 'jp',
+        }
+        self.langmap = langmap
+
+    def convert_lang (self, lang):
+        t = lang.lower()
+        if t in self.langmap:
+            return self.langmap[t]
+        return lang
 
     def translate (self, sl, tl, text):
+        httpProfile = HttpProfile()
+        httpProfile.endpoint = "tmt.tencentcloudapi.com"
         sl, tl = self.guess_language(sl, tl, text)
-        url = 'https://fy.iciba.com/ajax.php'
-        req = {}
-        req['a'] = 'fy'
-        req['f'] = sl
-        req['t'] = tl
-        req['w'] = text
-        try:
-            r = self.http_get(url, req, None)
-        except:
-            print("\nciba time out")
-            exit(-1)
-        if not r:
-            return None
-        try:
-            resp = r.json()
-        except:
-            return None
-        resp = r.json()
-        if not resp:
-            return None
-        res = self.create_translation(sl, tl, text)
-        res['definition'] = ''
-        if 'content' in resp:
-            if 'out' in resp['content']:
-                res['definition'] = resp['content']['out'] or ''
-            if 'ph_en' in resp['content']:
-                res['phonetic'] = resp['content']['ph_en'] or ''
-            if 'word_mean' in resp['content']:
-                res['explain'] = resp['content']['word_mean'] or ''
-        return res
+        clientProfile = ClientProfile()
+        clientProfile.httpProfile = httpProfile
+        cred = credential.Credential(self.SecretId,self.SecretKey)
+        # 实例化要请求产品的client对象,clientProfile是可选的
+        client = tmt_client.TmtClient(cred, "ap-chengdu", clientProfile)
+
+        # 实例化一个请求对象,每个接口都会对应一个request对象
+        req = models.TextTranslateRequest()
+        params = {
+            "SourceText": text,
+            "Source": 'auto',
+            "Target": 'zh',
+            "ProjectId": 0
+        }
+        req.from_json_string(json.dumps(params))
+
+        # 返回的resp是一个TextTranslateResponse的实例，与请求对象对应
+        resp = client.TextTranslate(req)
+        #print(resp)
+        # 输出json格式的字符串回包
+
+        res = {}
+        res['text'] = text
+        res['sl'] = resp.Source
+        res['tl'] = resp.Target
+        res['info'] = None
+        res['translation'] = resp.TargetText
+        res['html'] = None
+        res['xterm'] = None
+        #print(resp.to_json_string())
+        return(res)
+
+
 
 
 #----------------------------------------------------------------------
@@ -713,12 +518,10 @@ def getopt (argv):
 # 引擎注册
 #----------------------------------------------------------------------
 ENGINES = {
-    'google': GoogleTranslator,
-    'azure': AzureTranslator,
     'baidu': BaiduTranslator,
-    'youdao': YoudaoTranslator,
+    'tecent': TecentTranslator,
+    #'youdao': YoudaoTranslator,
     'bing': BingDict,
-    'ciba': CibaTranslator,
 }
 
 #----------------------------------------------------------------------
@@ -733,9 +536,9 @@ def print_res(res, text, options):
         return 0
     if not res:
         return -2
-    if 'text' in res:
-        if res['text']:
-            print(res['text'])
+    #if 'text' in res:
+        #if res['text']:
+            #print(res['text'])
     if 'phonetic' in res:
         if res['phonetic'] and ('phonetic' in options):
             print('[' + res['phonetic'] + ']')
@@ -771,7 +574,7 @@ class TransThread(threading.Thread):
         print("----------------------------------------------------------------------")
         print(self.engine.__name__)
         print("----------------------------------------------------------------------")
-        print_res(res, self.text, self.options)
+        print_res(res, self.text.strip(), self.options)
 
 
 #----------------------------------------------------------------------
@@ -785,10 +588,10 @@ def main(argv = None):
     engine = options.get('engine')
     if not engine:
         engine = 'all'
-    sl = options.get('from')
+    sl = options.get('from') #selected Language
     if not sl:
         sl = 'auto'
-    tl = options.get('to')
+    tl = options.get('to') #translate to Language
     if not tl:
         tl = 'auto'
     if not args:
@@ -798,6 +601,7 @@ def main(argv = None):
         return 0
     text = ' '.join(args)
     if engine == 'all':
+        #print(">"+text+"\n")
         for engines in ENGINES.values():
             thread = TransThread(sl, tl, text, engines, options)
             thread.start()
@@ -816,67 +620,4 @@ def main(argv = None):
 # testing suit
 #----------------------------------------------------------------------
 if __name__ == '__main__':
-    def test1():
-        bt = BasicTranslator('test')
-        r = bt.request("http://www.baidu.com")
-        print(r.text)
-        return 0
-    def test2():
-        gt = GoogleTranslator()
-        # r = gt.translate('auto', 'auto', 'Hello, World !!')
-        # r = gt.translate('auto', 'auto', '你吃饭了没有?')
-        # r = gt.translate('auto', 'auto', '长')
-        r = gt.translate('auto', 'auto', 'long')
-        # r = gt.translate('auto', 'auto', 'kiss')
-        # r = gt.translate('auto', 'auto', '亲吻')
-        import pprint
-        print(r['translation'])
-        # pprint.pprint(r['info'])
-        return 0
-    def test3():
-        t = YoudaoTranslator()
-        r = t.translate('auto', 'auto', 'kiss')
-        import pprint
-        pprint.pprint(r)
-        print(r['translation'])
-        return 0
-    def test4():
-        t = AzureTranslator()
-        r = t.translate('', 'japanese', '吃饭没有？')
-        # print(r['info'])
-        # print()
-        print(r['translation'])
-    def test5():
-        t = BaiduTranslator()
-        r = t.translate('', '', '吃饭了没有?')
-        import pprint
-        pprint.pprint(r)
-        print(r['translation'])
-        return 0
-    def test6():
-        t = CibaTranslator()
-        r = t.translate('', '', '吃饭没有？')
-        # print(r['info'])
-        # print()
-        print(r['translation'])
-    def test7():
-        # t = CibaTranslator()
-        t = GoogleTranslator()
-        # t = YoudaoTranslator()
-        # t = BingDict()
-        # r = t.translate('zh', 'en', '吃饭了没有？')
-        # r = t.translate('', '', 'apple')
-        r = t.translate('', '', '正在测试翻译一段话')
-        pprint.pprint(r)
-    def test9():
-        argv = ['', '正在测试翻译一段话']
-        main(argv)
-        print('=====')
-        argv = ['', '--engine=bing', '--sl=zh', '--tl=en', '正在测试翻译一段话']
-        main(argv)
-        print('=====')
-        argv = ['', '--engine=bing', '--sl=zh', '--tl=en', '-json', '苹果']
-        main(argv)
-        return 0
-    # test9()
     main()
